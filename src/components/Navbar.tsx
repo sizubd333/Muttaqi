@@ -206,14 +206,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </nav>
 
-          {/* Action Call Button, Login Button & Mobile Menu Toggle */}
+          {/* Action Call Button & Mobile Menu Toggle */}
           <div className="flex items-center gap-2.5 sm:gap-3">
-            {/* Header Login / Admin / Haji Portal Button */}
+            {/* Active User Session Pill (only shown when an admin or Haji is logged in) */}
             {activeHajiSession ? (
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="hidden sm:flex items-center gap-1.5">
                 <button
                   onClick={onOpenLogin}
-                  className="px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs font-bold text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-bold text-emerald-950 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
                   title="হাজী পোর্টাল দেখুন"
                 >
                   <Compass className="w-3.5 h-3.5 text-emerald-700" />
@@ -221,45 +221,30 @@ export const Navbar: React.FC<NavbarProps> = ({
                 </button>
                 <button
                   onClick={hajiLogout}
-                  className="p-1.5 sm:p-2 text-stone-500 hover:text-rose-600 rounded-full hover:bg-stone-100 transition-colors cursor-pointer"
-                  title="হাজী পোর্টাল লগআউট"
+                  className="p-1.5 text-stone-500 hover:text-rose-600 rounded-full hover:bg-stone-100 transition-colors cursor-pointer"
+                  title="লগআউট"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : isAdminLoggedIn ? (
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="hidden sm:flex items-center gap-1.5">
                 <button
                   onClick={() => handleNavClick('admin')}
-                  className="px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs font-bold text-[#0f2922] bg-[#DCB473] hover:bg-[#c99f5e] rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  className="px-3 py-1.5 text-xs font-bold text-[#0f2922] bg-[#DCB473] hover:bg-[#c99f5e] rounded-full shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
                 >
                   <UserCheck className="w-3.5 h-3.5" />
                   <span>এডমিন</span>
                 </button>
                 <button
                   onClick={logout}
-                  className="p-1.5 sm:p-2 text-stone-500 hover:text-rose-600 rounded-full hover:bg-stone-100 transition-colors cursor-pointer"
+                  className="p-1.5 text-stone-500 hover:text-rose-600 rounded-full hover:bg-stone-100 transition-colors cursor-pointer"
                   title="লগআউট"
                 >
-                  <LogOut className="w-4 h-4" />
+                  <LogOut className="w-3.5 h-3.5" />
                 </button>
               </div>
-            ) : (
-              <button
-                onClick={onOpenLogin}
-                className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold text-[#0f2922] bg-[#DCB473]/30 hover:bg-[#DCB473] rounded-full border border-[#DCB473] transition-all cursor-pointer shadow-xs hover:shadow"
-              >
-                <Lock className="w-3.5 h-3.5 text-[#0f2922]" />
-                <span>লগইন (হাজী / এডমিন)</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => onOpenInquiry()}
-              className="hidden lg:inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-[#0f2922] bg-[#DCB473] hover:bg-[#c99f5e] rounded-full shadow-sm transition-all hover:shadow active:scale-95 cursor-pointer"
-            >
-              অনুসন্ধান ফরম
-            </button>
+            ) : null}
 
             <a
               href={`tel:${companyInfo.phone1}`}

@@ -21,6 +21,11 @@ import {
   GALLERY_ITEMS as DEFAULT_GALLERY_ITEMS,
   STATS as DEFAULT_STATS
 } from '../data/content';
+import {
+  SupabaseService,
+  SUPABASE_SQL_SCHEMA,
+  SupabaseSyncStatus
+} from '../services/supabaseService';
 
 export const ADMIN_CREDENTIALS = {
   email: 'muttaqi.kafela@gmail.com',
@@ -348,6 +353,12 @@ interface AdminContextType {
   // Haji Price Discount Management
   applyHajiDiscount: (hajiId: string, discountPercent: number, discountNote?: string) => void;
   removeHajiDiscount: (hajiId: string) => void;
+
+  // Supabase Database Connection & Storage
+  supabaseStatus: SupabaseSyncStatus;
+  syncAllWithSupabase: () => Promise<void>;
+  refreshFromSupabase: () => Promise<void>;
+  supabaseSchemaSql: string;
 
   resetToDefaults: () => void;
 }
@@ -678,6 +689,159 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     safeSet('muttaqi_contact_messages', JSON.stringify(contactMessages));
   }, [contactMessages]);
 
+  // Supabase Live Status & Sync Engine
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseSyncStatus>({
+    isConnected: false,
+    isTablesReady: false,
+    lastSyncTime: null,
+    pendingSyncCount: 0,
+    errorMessage: null
+  });
+
+  // Check Supabase connection and load remote data on startup
+  useEffect(() => {
+    let isMounted = true;
+    const initSupabase = async () => {
+      try {
+        const conn = await SupabaseService.checkConnection();
+        if (!isMounted) return;
+
+        setSupabaseStatus((prev) => ({
+          ...prev,
+          isConnected: conn.connected,
+          isTablesReady: conn.tablesReady,
+          errorMessage: conn.connected ? null : conn.message
+        }));
+
+        if (conn.connected) {
+          const [remoteInquiries, remotePricing, remoteMessages, remoteReviews, remoteCompany] =
+            await Promise.allSettled([
+              SupabaseService.fetchInquiries(),
+              SupabaseService.fetchPricingConfig(),
+              SupabaseService.fetchContactMessages(),
+              SupabaseService.fetchReviews(),
+              SupabaseService.fetchCompanyInfo()
+            ]);
+
+          if (!isMounted) return;
+
+          if (remoteInquiries.status === 'fulfilled' && remoteInquiries.value && remoteInquiries.value.length > 0) {
+            const inqs = remoteInquiries.value;
+            setInquiries((prev) => {
+              const existingIds = new Set(prev.map((i) => i.id));
+              const newItems = inqs.filter((r) => !existingIds.has(r.id));
+              const merged = prev.map((local) => {
+                const match = inqs.find((r) => r.id === local.id);
+                return match || local;
+              });
+              return [...merged, ...newItems];
+            });
+          }
+
+          if (remotePricing.status === 'fulfilled' && remotePricing.value && remotePricing.value.packages.length > 0) {
+            setPricingConfig(remotePricing.value);
+          }
+
+          if (remoteMessages.status === 'fulfilled' && remoteMessages.value && remoteMessages.value.length > 0) {
+            setContactMessages(remoteMessages.value);
+          }
+
+          if (remoteReviews.status === 'fulfilled' && remoteReviews.value && remoteReviews.value.length > 0) {
+            setReviews(remoteReviews.value);
+          }
+
+          if (remoteCompany.status === 'fulfilled' && remoteCompany.value) {
+            setCompanyInfo((prev) => ({ ...prev, ...remoteCompany.value }));
+          }
+
+          setSupabaseStatus((prev) => ({
+            ...prev,
+            lastSyncTime: new Date().toLocaleTimeString('bn-BD')
+          }));
+        }
+      } catch (err) {
+        console.warn('Initial Supabase connection check error:', err);
+      }
+    };
+
+    initSupabase();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const syncAllWithSupabase = async (): Promise<void> => {
+    showToast('Supabase এ সমস্ত ডাটা সিঙ্ক শুরু হচ্ছে...');
+    try {
+      const result = await SupabaseService.syncAllToSupabase({
+        inquiries,
+        pricingConfig,
+        contactMessages,
+        reviews,
+        companyInfo
+      });
+
+      const nowTime = new Date().toLocaleTimeString('bn-BD');
+      setSupabaseStatus((prev) => ({
+        ...prev,
+        isConnected: true,
+        lastSyncTime: nowTime,
+        isTablesReady: result.success || prev.isTablesReady
+      }));
+
+      if (result.success) {
+        showToast(`সফল! ${result.syncedInquiries} জন হাজী ও প্যাকেজ রেট ক্লাউডে সংরক্ষিত হয়েছে।`);
+      } else {
+        showToast('সিঙ্ক চেষ্টা সম্পন্ন (টেবিল তৈরি নিশ্চিত করতে SQL স্ক্রিপ্ট রান করুন)।');
+      }
+    } catch (e: any) {
+      showToast('সিঙ্ক করতে সমস্যা হয়েছে: ' + (e?.message || 'নেটওয়ার্ক ত্রুটি'));
+    }
+  };
+
+  const refreshFromSupabase = async (): Promise<void> => {
+    showToast('Supabase থেকে ডাটা রিফ্রেশ করা হচ্ছে...');
+    try {
+      const [remoteInquiries, remotePricing, remoteMessages, remoteReviews, remoteCompany] =
+        await Promise.allSettled([
+          SupabaseService.fetchInquiries(),
+          SupabaseService.fetchPricingConfig(),
+          SupabaseService.fetchContactMessages(),
+          SupabaseService.fetchReviews(),
+          SupabaseService.fetchCompanyInfo()
+        ]);
+
+      let recordCount = 0;
+      if (remoteInquiries.status === 'fulfilled' && remoteInquiries.value) {
+        setInquiries(remoteInquiries.value);
+        recordCount += remoteInquiries.value.length;
+      }
+      if (remotePricing.status === 'fulfilled' && remotePricing.value && remotePricing.value.packages.length > 0) {
+        setPricingConfig(remotePricing.value);
+      }
+      if (remoteMessages.status === 'fulfilled' && remoteMessages.value) {
+        setContactMessages(remoteMessages.value);
+        recordCount += remoteMessages.value.length;
+      }
+      if (remoteReviews.status === 'fulfilled' && remoteReviews.value) {
+        setReviews(remoteReviews.value);
+        recordCount += remoteReviews.value.length;
+      }
+      if (remoteCompany.status === 'fulfilled' && remoteCompany.value) {
+        setCompanyInfo((prev) => ({ ...prev, ...remoteCompany.value }));
+      }
+
+      setSupabaseStatus((prev) => ({
+        ...prev,
+        isConnected: true,
+        lastSyncTime: new Date().toLocaleTimeString('bn-BD')
+      }));
+      showToast(`ক্লাউড থেকে সফলভাবে রিফ্রেশ হয়েছে (${recordCount} টি রেকর্ড লোড হয়েছে)।`);
+    } catch (e: any) {
+      showToast('রিফ্রেশ ব্যর্থ হয়েছে: ' + (e?.message || 'নেটওয়ার্ক ত্রুটি'));
+    }
+  };
+
   const registerSubAdmin = (
     subAdminData: Omit<SubAdminUser, 'id' | 'createdAt' | 'role' | 'isApproved'>
   ): SubAdminUser => {
@@ -787,7 +951,11 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const updateCompanyInfo = (info: Partial<CompanyInfo>) => {
-    setCompanyInfo((prev) => ({ ...prev, ...info }));
+    setCompanyInfo((prev) => {
+      const next = { ...prev, ...info };
+      SupabaseService.saveCompanyInfo(next).catch(() => {});
+      return next;
+    });
     showToast('সাধারণ তথ্য সফলভাবে সংরক্ষিত হয়েছে!');
   };
 
@@ -905,18 +1073,26 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setInquiries((prev) => [newInquiry, ...prev]);
     showToast('আপনার অনুসন্ধান অনুরোধ সফলভাবে পাঠানো হয়েছে!');
+
+    // Push new registration to Supabase database
+    SupabaseService.saveInquiry(newInquiry).then((ok) => {
+      if (ok) {
+        setSupabaseStatus((prev) => ({ ...prev, lastSyncTime: new Date().toLocaleTimeString('bn-BD') }));
+      }
+    });
   };
 
   const updateInquiry = (inquiry: InquiryItem) => {
     setInquiries((prev) => prev.map((i) => (i.id === inquiry.id ? inquiry : i)));
     showToast('বুকিং তথ্য আপডেট হয়েছে!');
+    SupabaseService.saveInquiry(inquiry);
   };
 
   const updateInquiryStatus = (id: string, status: InquiryItem['status'], notes?: string) => {
     setInquiries((prev) =>
       prev.map((item) => {
         if (item.id === id) {
-          const next = {
+          const next: InquiryItem = {
             ...item,
             status,
             adminNotes: notes !== undefined ? notes : item.adminNotes,
@@ -929,6 +1105,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ? 'যোগাযোগ সম্পন্ন হিসেবে চিহ্নিত করা হয়েছে।'
               : 'স্ট্যাটাস আপডেট হয়েছে।'
           );
+          SupabaseService.saveInquiry(next);
           return next;
         }
         return item;
@@ -942,6 +1119,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showToast('বুকিং অনুরোধ মুছে ফেলা হয়েছে!');
       return remaining;
     });
+    SupabaseService.deleteInquiry(id);
   };
 
   const addContactMessage = (msg: Omit<ContactMessage, 'id' | 'date' | 'status'>) => {
@@ -953,24 +1131,29 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setContactMessages((prev) => [newMsg, ...prev]);
     showToast('আপনার বার্তা সফলভাবে গ্রহণ করা হয়েছে!');
+    SupabaseService.saveContactMessage(newMsg);
   };
 
   const updateContactMessage = (msg: ContactMessage) => {
     setContactMessages((prev) => prev.map((m) => (m.id === msg.id ? msg : m)));
     showToast('বার্তা আপডেট হয়েছে!');
+    SupabaseService.saveContactMessage(msg);
   };
 
   const updateMessageStatus = (id: string, status: ContactMessage['status'], notes?: string) => {
     setContactMessages((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              status,
-              adminNotes: notes !== undefined ? notes : item.adminNotes
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id === id) {
+          const next = {
+            ...item,
+            status,
+            adminNotes: notes !== undefined ? notes : item.adminNotes
+          };
+          SupabaseService.saveContactMessage(next);
+          return next;
+        }
+        return item;
+      })
     );
     showToast('বার্তার স্ট্যাটাস আপডেট হয়েছে!');
   };
@@ -981,6 +1164,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showToast('বার্তা মুছে ফেলা হয়েছে!');
       return remaining;
     });
+    SupabaseService.deleteContactMessage(id);
   };
 
   const addReview = (review: Omit<ReviewItem, 'id' | 'date' | 'isApproved'>) => {
@@ -992,11 +1176,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setReviews((prev) => [newRev, ...prev]);
     showToast(isAdminLoggedIn ? 'রিভিউ যুক্ত ও অনুমোদিত হয়েছে!' : 'মতামত জমা হয়েছে! এডমিন অনুমোদনের পর তা প্রদর্শিত হবে।');
+    SupabaseService.saveReview(newRev);
   };
 
   const updateReview = (review: ReviewItem) => {
     setReviews((prev) => prev.map((r) => (r.id === review.id ? review : r)));
     showToast('রিভিউ সফলভাবে আপডেট হয়েছে!');
+    SupabaseService.saveReview(review);
   };
 
   const deleteReview = (id: string) => {
@@ -1005,6 +1191,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showToast('রিভিউ মুছে ফেলা হয়েছে!');
       return remaining;
     });
+    SupabaseService.deleteReview(id);
   };
 
   const toggleReviewApproval = (id: string) => {
@@ -1013,7 +1200,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (r.id === id) {
           const next = !r.isApproved;
           showToast(next ? 'রিভিউ অনুমোদিত হয়েছে ও ওয়েবসাইটে লাইভ!' : 'রিভিউ লুকানো হয়েছে!');
-          return { ...r, isApproved: next };
+          const updated = { ...r, isApproved: next };
+          SupabaseService.saveReview(updated);
+          return updated;
         }
         return r;
       })
@@ -1023,6 +1212,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const updatePricingConfig = (config: KafelaPricingConfig) => {
     setPricingConfig(config);
     showToast('মূল্য নির্ধারণের তালিকা সফলভাবে সংরক্ষিত হয়েছে!');
+    SupabaseService.savePricingConfig(config);
   };
 
   const addPricingItem = (item: Omit<PricingItem, 'id'>) => {
@@ -1042,10 +1232,12 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? 'airfares'
           : 'incidentals';
 
-      return {
+      const nextConfig = {
         ...prev,
         [catKey]: [...prev[catKey], newItem]
       };
+      SupabaseService.savePricingConfig(nextConfig);
+      return nextConfig;
     });
     showToast('নতুন আইটেম সফলভাবে মূল্য তালিকায় যুক্ত হয়েছে!');
   };
@@ -1061,10 +1253,12 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? 'airfares'
           : 'incidentals';
 
-      return {
+      const nextConfig = {
         ...prev,
         [catKey]: prev[catKey].map((existing) => (existing.id === item.id ? item : existing))
       };
+      SupabaseService.savePricingConfig(nextConfig);
+      return nextConfig;
     });
     showToast('মূল্য ও তথ্য সফলভাবে আপডেট করা হয়েছে!');
   };
@@ -1080,10 +1274,12 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           ? 'airfares'
           : 'incidentals';
 
-      return {
+      const nextConfig = {
         ...prev,
         [catKey]: prev[catKey].filter((item) => item.id !== id)
       };
+      SupabaseService.savePricingConfig(nextConfig);
+      return nextConfig;
     });
     showToast('আইটেমটি সফলভাবে মূল্য তালিকা থেকে মুছে ফেলা হয়েছে!');
   };
@@ -1092,6 +1288,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setPricingConfig(DEFAULT_PRICING_CONFIG);
     safeSet('muttaqi_pricing_config', JSON.stringify(DEFAULT_PRICING_CONFIG));
     showToast('হজ, হোটেল, বিমান ও আনুসঙ্গিক খরচ ডিফল্ট রেটে রিসেট করা হয়েছে!');
+    SupabaseService.savePricingConfig(DEFAULT_PRICING_CONFIG);
   };
 
   const applyHajiDiscount = (hajiId: string, discountPercent: number, discountNote?: string) => {
@@ -1102,7 +1299,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const subtotal = item.subtotalAmount || item.finalTotalAmount || 0;
           const discountAmt = Math.round((subtotal * validPercent) / 100);
           const finalTotal = Math.max(0, subtotal - discountAmt);
-          return {
+          const updated: InquiryItem = {
             ...item,
             discountPercent: validPercent,
             discountAmount: discountAmt,
@@ -1110,6 +1307,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             discountNote: discountNote !== undefined ? discountNote : item.discountNote,
             pricingUpdatedAt: new Date().toLocaleDateString('bn-BD')
           };
+          SupabaseService.saveInquiry(updated);
+          return updated;
         }
         return item;
       })
@@ -1122,7 +1321,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       prev.map((item) => {
         if (item.id === hajiId) {
           const subtotal = item.subtotalAmount || item.finalTotalAmount || 0;
-          return {
+          const updated: InquiryItem = {
             ...item,
             discountPercent: 0,
             discountAmount: 0,
@@ -1130,6 +1329,8 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             discountNote: '',
             pricingUpdatedAt: new Date().toLocaleDateString('bn-BD')
           };
+          SupabaseService.saveInquiry(updated);
+          return updated;
         }
         return item;
       })
@@ -1230,6 +1431,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         resetPricingToDefaults,
         applyHajiDiscount,
         removeHajiDiscount,
+        supabaseStatus,
+        syncAllWithSupabase,
+        refreshFromSupabase,
+        supabaseSchemaSql: SUPABASE_SQL_SCHEMA,
         resetToDefaults
       }}
     >
