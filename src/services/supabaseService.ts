@@ -7,7 +7,9 @@ import {
   KafelaPricingConfig,
   ServiceItem,
   TeamMember,
-  GalleryItem
+  GalleryItem,
+  HajiFinanceRecord,
+  OfficeExpense
 } from '../types';
 
 export const SUPABASE_SQL_SCHEMA = `-- ========================================================
@@ -126,13 +128,60 @@ CREATE TABLE IF NOT EXISTS public.app_storage (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 7. Enable Row Level Security (RLS) & Public Policies for App Access
+-- 7. Main Hajj & Umrah Haji Financial Ledger (মূল হজ ও ওমরাহ্ হাজীদের আয়-ব্যয় ডাটাবেজ)
+CREATE TABLE IF NOT EXISTS public.haji_finance_records (
+  id TEXT PRIMARY KEY,
+  inquiry_id TEXT,
+  registration_ref TEXT,
+  haji_type TEXT NOT NULL DEFAULT 'hajj', -- 'hajj' (মূল হজ) | 'umrah' (ওমরাহ্ হজ)
+  year_season TEXT NOT NULL DEFAULT '২০২৬',
+  haji_name TEXT NOT NULL,
+  haji_name_bn TEXT,
+  phone TEXT,
+  email TEXT,
+  nid_no TEXT,
+  passport_no TEXT,
+  district TEXT,
+  package_name TEXT,
+  package_price NUMERIC DEFAULT 0,
+  discount_amount NUMERIC DEFAULT 0,
+  final_total_amount NUMERIC DEFAULT 0,
+  total_deposited NUMERIC DEFAULT 0,
+  due_amount NUMERIC DEFAULT 0,
+  payment_status TEXT DEFAULT 'due', -- 'paid' | 'partial' | 'due'
+  payments JSONB DEFAULT '[]'::jsonb,
+  expenses JSONB DEFAULT '[]'::jsonb,
+  total_expense NUMERIC DEFAULT 0,
+  net_profit NUMERIC DEFAULT 0,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Office Overhead & Operational Expenses (অফিস ও পরিচালন ব্যয় ডাটাবেজ)
+CREATE TABLE IF NOT EXISTS public.office_expenses (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL, -- 'rent' | 'salary' | 'utility' | 'marketing' | 'stationery' | 'legal_license' | 'other'
+  amount NUMERIC NOT NULL DEFAULT 0,
+  date TEXT NOT NULL,
+  expense_type TEXT DEFAULT 'general', -- 'general' | 'hajj_overhead' | 'umrah_overhead'
+  year_season TEXT DEFAULT '২০২৬',
+  paid_by TEXT,
+  voucher_no TEXT,
+  note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Enable Row Level Security (RLS) & Public Policies for App Access
 ALTER TABLE public.inquiries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contact_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pricing_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_info ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.app_storage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.haji_finance_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.office_expenses ENABLE ROW LEVEL SECURITY;
 
 -- Allow public read & write access for app integration
 DROP POLICY IF EXISTS "Public access for inquiries" ON public.inquiries;
@@ -152,6 +201,12 @@ CREATE POLICY "Public access for company_info" ON public.company_info FOR ALL US
 
 DROP POLICY IF EXISTS "Public access for app_storage" ON public.app_storage;
 CREATE POLICY "Public access for app_storage" ON public.app_storage FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access for haji_finance_records" ON public.haji_finance_records;
+CREATE POLICY "Public access for haji_finance_records" ON public.haji_finance_records FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public access for office_expenses" ON public.office_expenses;
+CREATE POLICY "Public access for office_expenses" ON public.office_expenses FOR ALL USING (true) WITH CHECK (true);
 `;
 
 export interface SupabaseSyncStatus {
@@ -625,6 +680,205 @@ export const SupabaseService = {
     }
   },
 
+  async getAppStorageItem<T = any>(key: string): Promise<T | null> {
+    try {
+      const { data, error } = await supabase
+        .from('app_storage')
+        .select('value')
+        .eq('key', key)
+        .maybeSingle();
+
+      if (error || !data) return null;
+      return data.value as T;
+    } catch {
+      return null;
+    }
+  },
+
+  // Save Haji Finance Record to Supabase
+  async saveHajiFinanceRecord(record: HajiFinanceRecord): Promise<boolean> {
+    try {
+      const payload = {
+        id: record.id,
+        inquiry_id: record.inquiryId || null,
+        registration_ref: record.registrationRef || null,
+        haji_type: record.hajiType || 'hajj',
+        year_season: record.yearSeason || '২০২৬',
+        haji_name: record.hajiName,
+        haji_name_bn: record.hajiNameBn || null,
+        phone: record.phone || '',
+        email: record.email || null,
+        nid_no: record.nidNo || null,
+        passport_no: record.passportNo || null,
+        district: record.district || null,
+        package_name: record.packageName || '',
+        package_price: record.packagePrice ?? 0,
+        discount_amount: record.discountAmount ?? 0,
+        final_total_amount: record.finalTotalAmount ?? 0,
+        total_deposited: record.totalDeposited ?? 0,
+        due_amount: record.dueAmount ?? 0,
+        payment_status: record.paymentStatus || 'due',
+        payments: record.payments || [],
+        expenses: record.expenses || [],
+        total_expense: record.totalExpense ?? 0,
+        net_profit: record.netProfit ?? 0,
+        notes: record.notes || null,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('haji_finance_records')
+        .upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        // Fallback to app_storage
+        if (error.code === 'PGRST205' || error.message?.includes('Could not find')) {
+          await this.saveAppStorageItem(`haji_fin_${record.id}`, record);
+        } else {
+          console.warn('Supabase saveHajiFinanceRecord error:', error);
+        }
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.warn('Supabase saveHajiFinanceRecord exception:', err);
+      return false;
+    }
+  },
+
+  // Delete Haji Finance Record from Supabase
+  async deleteHajiFinanceRecord(id: string): Promise<boolean> {
+    try {
+      const { error } = await supabase.from('haji_finance_records').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // Fetch Haji Finance Records from Supabase
+  async fetchHajiFinanceRecords(): Promise<HajiFinanceRecord[] | null> {
+    try {
+      const { data, error } = await supabase
+        .from('haji_finance_records')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error || !data) {
+        // Try fallback app_storage
+        const cached = await this.getAppStorageItem<HajiFinanceRecord[]>('all_haji_finance_records');
+        if (cached && Array.isArray(cached)) return cached;
+        return null;
+      }
+
+      return data.map((row: any): HajiFinanceRecord => ({
+        id: row.id,
+        inquiryId: row.inquiry_id,
+        registrationRef: row.registration_ref,
+        hajiType: (row.haji_type as 'hajj' | 'umrah') || 'hajj',
+        yearSeason: row.year_season || '২০২৬',
+        hajiName: row.haji_name || '',
+        hajiNameBn: row.haji_name_bn,
+        phone: row.phone || '',
+        email: row.email,
+        nidNo: row.nid_no,
+        passportNo: row.passport_no,
+        district: row.district,
+        packageName: row.package_name || '',
+        packagePrice: Number(row.package_price || 0),
+        discountAmount: Number(row.discount_amount || 0),
+        finalTotalAmount: Number(row.final_total_amount || 0),
+        totalDeposited: Number(row.total_deposited || 0),
+        dueAmount: Number(row.due_amount || 0),
+        paymentStatus: row.payment_status || 'due',
+        payments: Array.isArray(row.payments) ? row.payments : [],
+        expenses: Array.isArray(row.expenses) ? row.expenses : [],
+        totalExpense: Number(row.total_expense || 0),
+        netProfit: Number(row.net_profit || 0),
+        notes: row.notes,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
+    } catch {
+      return null;
+    }
+  },
+
+  // Save Office Expense to Supabase
+  async saveOfficeExpense(expense: OfficeExpense): Promise<boolean> {
+    try {
+      const payload = {
+        id: expense.id,
+        title: expense.title,
+        category: expense.category,
+        amount: expense.amount ?? 0,
+        date: expense.date,
+        expense_type: expense.expenseType || 'general',
+        year_season: expense.yearSeason || '২০২৬',
+        paid_by: expense.paidBy || null,
+        voucher_no: expense.voucherNo || null,
+        note: expense.note || null,
+        created_at: expense.createdAt || new Date().toISOString()
+      };
+
+      const { error } = await supabase
+        .from('office_expenses')
+        .upsert(payload, { onConflict: 'id' });
+
+      if (error) {
+        if (error.code === 'PGRST205' || error.message?.includes('Could not find')) {
+          await this.saveAppStorageItem(`off_exp_${expense.id}`, expense);
+        }
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // Delete Office Expense from Supabase
+  async deleteOfficeExpense(id: string): Promise<boolean> {
+    try {
+      const { error } = await supabase.from('office_expenses').delete().eq('id', id);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // Fetch Office Expenses from Supabase
+  async fetchOfficeExpenses(): Promise<OfficeExpense[] | null> {
+    try {
+      const { data, error } = await supabase
+        .from('office_expenses')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (error || !data) {
+        const cached = await this.getAppStorageItem<OfficeExpense[]>('all_office_expenses');
+        if (cached && Array.isArray(cached)) return cached;
+        return null;
+      }
+
+      return data.map((row: any): OfficeExpense => ({
+        id: row.id,
+        title: row.title,
+        category: row.category,
+        amount: Number(row.amount || 0),
+        date: row.date,
+        expenseType: row.expense_type || 'general',
+        yearSeason: row.year_season,
+        paidBy: row.paid_by,
+        voucherNo: row.voucher_no,
+        note: row.note,
+        createdAt: row.created_at
+      }));
+    } catch {
+      return null;
+    }
+  },
+
   // Mass sync all local application data to Supabase
   async syncAllToSupabase(data: {
     inquiries: InquiryItem[];
@@ -632,17 +886,23 @@ export const SupabaseService = {
     contactMessages: ContactMessage[];
     reviews: ReviewItem[];
     companyInfo: CompanyInfo;
+    hajiFinanceRecords?: HajiFinanceRecord[];
+    officeExpenses?: OfficeExpense[];
   }): Promise<{
     success: boolean;
     syncedInquiries: number;
     syncedMessages: number;
     syncedReviews: number;
+    syncedFinanceRecords: number;
+    syncedOfficeExpenses: number;
     errors: string[];
   }> {
     const errors: string[] = [];
     let syncedInquiries = 0;
     let syncedMessages = 0;
     let syncedReviews = 0;
+    let syncedFinanceRecords = 0;
+    let syncedOfficeExpenses = 0;
 
     // 1. Sync Inquiries
     for (const inq of data.inquiries) {
@@ -671,14 +931,35 @@ export const SupabaseService = {
       if (ok) syncedReviews++;
     }
 
-    // 5. Sync Company Info
+    // 5. Sync Haji Finance Records (মূল হজ ও ওমরাহ্ আয়-ব্যয়)
+    if (data.hajiFinanceRecords && data.hajiFinanceRecords.length > 0) {
+      for (const rec of data.hajiFinanceRecords) {
+        const ok = await this.saveHajiFinanceRecord(rec);
+        if (ok) syncedFinanceRecords++;
+      }
+      // Backup snapshot
+      await this.saveAppStorageItem('all_haji_finance_records', data.hajiFinanceRecords);
+    }
+
+    // 6. Sync Office Expenses
+    if (data.officeExpenses && data.officeExpenses.length > 0) {
+      for (const exp of data.officeExpenses) {
+        const ok = await this.saveOfficeExpense(exp);
+        if (ok) syncedOfficeExpenses++;
+      }
+      await this.saveAppStorageItem('all_office_expenses', data.officeExpenses);
+    }
+
+    // 7. Sync Company Info
     await this.saveCompanyInfo(data.companyInfo);
 
-    // 6. Also save full snapshot in app_storage if available
+    // 8. Full snapshot in app_storage
     await this.saveAppStorageItem('full_backup_snapshot', {
       timestamp: new Date().toISOString(),
       inquiriesCount: data.inquiries.length,
-      pricing: data.pricingConfig
+      pricing: data.pricingConfig,
+      financeCount: data.hajiFinanceRecords?.length || 0,
+      officeExpCount: data.officeExpenses?.length || 0
     });
 
     return {
@@ -686,6 +967,8 @@ export const SupabaseService = {
       syncedInquiries,
       syncedMessages,
       syncedReviews,
+      syncedFinanceRecords,
+      syncedOfficeExpenses,
       errors
     };
   }

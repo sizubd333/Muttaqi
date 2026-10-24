@@ -11,7 +11,13 @@ import {
   SubAdminUser,
   PricingItem,
   KafelaPricingConfig,
-  PricingCategory
+  PricingCategory,
+  HajiFinanceRecord,
+  OfficeExpense,
+  PaymentRecord,
+  PilgrimExpenseItem,
+  FinanceSummary,
+  HajjType
 } from '../types';
 import {
   COMPANY_INFO as DEFAULT_COMPANY_INFO,
@@ -21,6 +27,12 @@ import {
   GALLERY_ITEMS as DEFAULT_GALLERY_ITEMS,
   STATS as DEFAULT_STATS
 } from '../data/content';
+import {
+  DEFAULT_HAJI_FINANCE_RECORDS,
+  DEFAULT_OFFICE_EXPENSES,
+  createDefaultHajjExpenses,
+  createDefaultUmrahExpenses
+} from '../data/defaultFinanceData';
 import {
   SupabaseService,
   SUPABASE_SQL_SCHEMA,
@@ -360,6 +372,30 @@ interface AdminContextType {
   refreshFromSupabase: () => Promise<void>;
   supabaseSchemaSql: string;
 
+  // Hajj & Umrah Financial Accounting (মূল হজ ও ওমরাহ্ আয়-ব্যয় ডাটাবেজ)
+  hajiFinanceRecords: HajiFinanceRecord[];
+  officeExpenses: OfficeExpense[];
+  addHajiFinanceRecord: (
+    record: Omit<
+      HajiFinanceRecord,
+      'id' | 'createdAt' | 'updatedAt' | 'totalExpense' | 'netProfit' | 'dueAmount' | 'totalDeposited' | 'finalTotalAmount' | 'payments' | 'expenses'
+    > & {
+      payments?: PaymentRecord[];
+      expenses?: PilgrimExpenseItem[];
+      finalTotalAmount?: number;
+    }
+  ) => HajiFinanceRecord;
+  updateHajiFinanceRecord: (record: HajiFinanceRecord) => void;
+  deleteHajiFinanceRecord: (id: string) => void;
+  addPilgrimPayment: (hajiFinanceId: string, payment: Omit<PaymentRecord, 'id'>) => void;
+  deletePilgrimPayment: (hajiFinanceId: string, paymentId: string) => void;
+  updatePilgrimExpenses: (hajiFinanceId: string, expenses: PilgrimExpenseItem[]) => void;
+  addOfficeExpense: (expense: Omit<OfficeExpense, 'id' | 'createdAt'>) => OfficeExpense;
+  updateOfficeExpense: (expense: OfficeExpense) => void;
+  deleteOfficeExpense: (id: string) => void;
+  importInquiryToFinance: (inquiryId: string, hajjType?: HajjType) => HajiFinanceRecord | null;
+  getFinanceSummary: (filterYear?: string) => FinanceSummary;
+
   resetToDefaults: () => void;
 }
 
@@ -604,6 +640,23 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     safeSet('muttaqi_pricing_config', JSON.stringify(pricingConfig));
   }, [pricingConfig]);
 
+  // Hajj & Umrah Financial Accounting States (মূল হজ ও ওমরাহ্ আয়-ব্যয় ডাটাবেজ)
+  const [hajiFinanceRecords, setHajiFinanceRecords] = useState<HajiFinanceRecord[]>(() =>
+    loadFromStorage('haji_finance_records', DEFAULT_HAJI_FINANCE_RECORDS)
+  );
+
+  const [officeExpenses, setOfficeExpenses] = useState<OfficeExpense[]>(() =>
+    loadFromStorage('office_expenses', DEFAULT_OFFICE_EXPENSES)
+  );
+
+  useEffect(() => {
+    safeSet('muttaqi_haji_finance_records', JSON.stringify(hajiFinanceRecords));
+  }, [hajiFinanceRecords]);
+
+  useEffect(() => {
+    safeSet('muttaqi_office_expenses', JSON.stringify(officeExpenses));
+  }, [officeExpenses]);
+
   const [contactMessages, setContactMessages] = useState<ContactMessage[]>(() =>
     loadFromStorage('contact_messages', [
       {
@@ -714,14 +767,23 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }));
 
         if (conn.connected) {
-          const [remoteInquiries, remotePricing, remoteMessages, remoteReviews, remoteCompany] =
-            await Promise.allSettled([
-              SupabaseService.fetchInquiries(),
-              SupabaseService.fetchPricingConfig(),
-              SupabaseService.fetchContactMessages(),
-              SupabaseService.fetchReviews(),
-              SupabaseService.fetchCompanyInfo()
-            ]);
+          const [
+            remoteInquiries,
+            remotePricing,
+            remoteMessages,
+            remoteReviews,
+            remoteCompany,
+            remoteFinance,
+            remoteOfficeExp
+          ] = await Promise.allSettled([
+            SupabaseService.fetchInquiries(),
+            SupabaseService.fetchPricingConfig(),
+            SupabaseService.fetchContactMessages(),
+            SupabaseService.fetchReviews(),
+            SupabaseService.fetchCompanyInfo(),
+            SupabaseService.fetchHajiFinanceRecords(),
+            SupabaseService.fetchOfficeExpenses()
+          ]);
 
           if (!isMounted) return;
 
@@ -754,6 +816,32 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             setCompanyInfo((prev) => ({ ...prev, ...remoteCompany.value }));
           }
 
+          if (remoteFinance.status === 'fulfilled' && remoteFinance.value && remoteFinance.value.length > 0) {
+            const finList = remoteFinance.value;
+            setHajiFinanceRecords((prev) => {
+              const existingIds = new Set(prev.map((f) => f.id));
+              const newItems = finList.filter((f) => !existingIds.has(f.id));
+              const merged = prev.map((local) => {
+                const match = finList.find((f) => f.id === local.id);
+                return match || local;
+              });
+              return [...merged, ...newItems];
+            });
+          }
+
+          if (remoteOfficeExp.status === 'fulfilled' && remoteOfficeExp.value && remoteOfficeExp.value.length > 0) {
+            const expList = remoteOfficeExp.value;
+            setOfficeExpenses((prev) => {
+              const existingIds = new Set(prev.map((e) => e.id));
+              const newItems = expList.filter((e) => !existingIds.has(e.id));
+              const merged = prev.map((local) => {
+                const match = expList.find((e) => e.id === local.id);
+                return match || local;
+              });
+              return [...merged, ...newItems];
+            });
+          }
+
           setSupabaseStatus((prev) => ({
             ...prev,
             lastSyncTime: new Date().toLocaleTimeString('bn-BD')
@@ -778,7 +866,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         pricingConfig,
         contactMessages,
         reviews,
-        companyInfo
+        companyInfo,
+        hajiFinanceRecords,
+        officeExpenses
       });
 
       const nowTime = new Date().toLocaleTimeString('bn-BD');
@@ -790,7 +880,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }));
 
       if (result.success) {
-        showToast(`সফল! ${result.syncedInquiries} জন হাজী ও প্যাকেজ রেট ক্লাউডে সংরক্ষিত হয়েছে।`);
+        showToast(`সফল! ${result.syncedInquiries} জন হাজী, ${result.syncedFinanceRecords} ফাইন্যান্স এন্ট্রি ও অফিস খরচ ক্লাউডে সংরক্ষিত হয়েছে।`);
       } else {
         showToast('সিঙ্ক চেষ্টা সম্পন্ন (টেবিল তৈরি নিশ্চিত করতে SQL স্ক্রিপ্ট রান করুন)।');
       }
@@ -1338,6 +1428,304 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     showToast('হাজীর বিশেষ ডিসকাউন্ট মুছে ফেলা হয়েছে (পূর্ণ মূল্য নির্ধারিত)।');
   };
 
+  // Helper to recompute totals for a HajiFinanceRecord
+  const calculateFinanceTotals = (
+    record: Partial<HajiFinanceRecord> & { payments?: PaymentRecord[]; expenses?: PilgrimExpenseItem[] }
+  ) => {
+    const pkgPrice = Number(record.packagePrice || 0);
+    const discAmount = Number(record.discountAmount || 0);
+    const finalTotal = Math.max(0, pkgPrice - discAmount);
+
+    const paymentsList = record.payments || [];
+    const totalDeposited = paymentsList.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const dueAmount = Math.max(0, finalTotal - totalDeposited);
+
+    let paymentStatus: 'paid' | 'partial' | 'due' = 'due';
+    if (totalDeposited >= finalTotal && finalTotal > 0) {
+      paymentStatus = 'paid';
+    } else if (totalDeposited > 0) {
+      paymentStatus = 'partial';
+    }
+
+    const expensesList = record.expenses || [];
+    const totalExpense = expensesList.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const netProfit = totalDeposited - totalExpense;
+
+    return {
+      finalTotalAmount: finalTotal,
+      totalDeposited,
+      dueAmount,
+      paymentStatus,
+      totalExpense,
+      netProfit
+    };
+  };
+
+  const addHajiFinanceRecord = (
+    recordData: Omit<
+      HajiFinanceRecord,
+      'id' | 'createdAt' | 'updatedAt' | 'totalExpense' | 'netProfit' | 'dueAmount' | 'totalDeposited' | 'finalTotalAmount' | 'payments' | 'expenses'
+    > & {
+      payments?: PaymentRecord[];
+      expenses?: PilgrimExpenseItem[];
+      finalTotalAmount?: number;
+    }
+  ): HajiFinanceRecord => {
+    const id = `fin-${Date.now()}`;
+    const defaultExpenses =
+      recordData.expenses && recordData.expenses.length > 0
+        ? recordData.expenses
+        : recordData.hajiType === 'hajj'
+        ? createDefaultHajjExpenses()
+        : createDefaultUmrahExpenses();
+
+    const computed = calculateFinanceTotals({
+      ...recordData,
+      expenses: defaultExpenses
+    });
+
+    const newRecord: HajiFinanceRecord = {
+      ...recordData,
+      id,
+      payments: recordData.payments || [],
+      expenses: defaultExpenses,
+      ...computed,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    setHajiFinanceRecords((prev) => [newRecord, ...prev]);
+    SupabaseService.saveHajiFinanceRecord(newRecord);
+    showToast(`${newRecord.hajiType === 'hajj' ? 'মূল হজ' : 'ওমরাহ্'} যাত্রীর আর্থিক হিসাব সংরক্ষিত হয়েছে!`);
+    return newRecord;
+  };
+
+  const updateHajiFinanceRecord = (record: HajiFinanceRecord) => {
+    const computed = calculateFinanceTotals(record);
+    const updated: HajiFinanceRecord = {
+      ...record,
+      ...computed,
+      updatedAt: new Date().toISOString()
+    };
+
+    setHajiFinanceRecords((prev) =>
+      prev.map((r) => (r.id === updated.id ? updated : r))
+    );
+    SupabaseService.saveHajiFinanceRecord(updated);
+    showToast('হাজীর হিসাব বিবরণী আপডেট করা হয়েছে!');
+  };
+
+  const deleteHajiFinanceRecord = (id: string) => {
+    setHajiFinanceRecords((prev) => prev.filter((r) => r.id !== id));
+    SupabaseService.deleteHajiFinanceRecord(id);
+    showToast('হিসাব রেকর্ডটি মুছে ফেলা হয়েছে!');
+  };
+
+  const addPilgrimPayment = (hajiFinanceId: string, paymentData: Omit<PaymentRecord, 'id'>) => {
+    const paymentId = `pay-${Date.now()}`;
+    const newPayment: PaymentRecord = {
+      ...paymentData,
+      id: paymentId,
+      date: paymentData.date || new Date().toISOString().split('T')[0]
+    };
+
+    setHajiFinanceRecords((prev) =>
+      prev.map((r) => {
+        if (r.id === hajiFinanceId) {
+          const updatedPayments = [...r.payments, newPayment];
+          const computed = calculateFinanceTotals({ ...r, payments: updatedPayments });
+          const updated: HajiFinanceRecord = {
+            ...r,
+            payments: updatedPayments,
+            ...computed,
+            updatedAt: new Date().toISOString()
+          };
+          SupabaseService.saveHajiFinanceRecord(updated);
+          return updated;
+        }
+        return r;
+      })
+    );
+    showToast(`৳${newPayment.amount.toLocaleString('en-IN')} টাকা পেমেন্ট জমা গ্রহণ করা হয়েছে!`);
+  };
+
+  const deletePilgrimPayment = (hajiFinanceId: string, paymentId: string) => {
+    setHajiFinanceRecords((prev) =>
+      prev.map((r) => {
+        if (r.id === hajiFinanceId) {
+          const updatedPayments = r.payments.filter((p) => p.id !== paymentId);
+          const computed = calculateFinanceTotals({ ...r, payments: updatedPayments });
+          const updated: HajiFinanceRecord = {
+            ...r,
+            payments: updatedPayments,
+            ...computed,
+            updatedAt: new Date().toISOString()
+          };
+          SupabaseService.saveHajiFinanceRecord(updated);
+          return updated;
+        }
+        return r;
+      })
+    );
+    showToast('পেমেন্ট ভাউচারটি বাতিল/মুছে ফেলা হয়েছে!');
+  };
+
+  const updatePilgrimExpenses = (hajiFinanceId: string, expenses: PilgrimExpenseItem[]) => {
+    setHajiFinanceRecords((prev) =>
+      prev.map((r) => {
+        if (r.id === hajiFinanceId) {
+          const computed = calculateFinanceTotals({ ...r, expenses });
+          const updated: HajiFinanceRecord = {
+            ...r,
+            expenses,
+            ...computed,
+            updatedAt: new Date().toISOString()
+          };
+          SupabaseService.saveHajiFinanceRecord(updated);
+          return updated;
+        }
+        return r;
+      })
+    );
+    showToast('হাজীর ব্যয়ের বিস্তারিত হিসাব সংরক্ষিত হয়েছে!');
+  };
+
+  const addOfficeExpense = (expenseData: Omit<OfficeExpense, 'id' | 'createdAt'>): OfficeExpense => {
+    const id = `off-${Date.now()}`;
+    const newExp: OfficeExpense = {
+      ...expenseData,
+      id,
+      createdAt: new Date().toISOString()
+    };
+    setOfficeExpenses((prev) => [newExp, ...prev]);
+    SupabaseService.saveOfficeExpense(newExp);
+    showToast('অফিস খরচের ভাউচার যুক্ত করা হয়েছে!');
+    return newExp;
+  };
+
+  const updateOfficeExpense = (expense: OfficeExpense) => {
+    setOfficeExpenses((prev) => prev.map((e) => (e.id === expense.id ? expense : e)));
+    SupabaseService.saveOfficeExpense(expense);
+    showToast('অফিস খরচের তথ্য আপডেট করা হয়েছে!');
+  };
+
+  const deleteOfficeExpense = (id: string) => {
+    setOfficeExpenses((prev) => prev.filter((e) => e.id !== id));
+    SupabaseService.deleteOfficeExpense(id);
+    showToast('অফিস খরচের রেকর্ড মুছে ফেলা হয়েছে!');
+  };
+
+  const importInquiryToFinance = (inquiryId: string, hajjType?: HajjType): HajiFinanceRecord | null => {
+    const inquiry = inquiries.find((i) => i.id === inquiryId);
+    if (!inquiry) return null;
+
+    // Detect if Hajj or Umrah from service title or name
+    const detectedType: HajjType =
+      hajjType ||
+      (inquiry.serviceName?.includes('ওমরাহ') || inquiry.serviceId?.includes('umrah') ? 'umrah' : 'hajj');
+
+    const pkgPrice = inquiry.finalTotalAmount || inquiry.packageBasePrice || (detectedType === 'hajj' ? 650000 : 165000);
+    const discAmount = inquiry.discountAmount || 0;
+
+    const record = addHajiFinanceRecord({
+      inquiryId: inquiry.id,
+      registrationRef: inquiry.registrationRef || `MUT-${detectedType.toUpperCase()}-${Math.floor(1000 + Math.random() * 9000)}`,
+      hajiType: detectedType,
+      yearSeason: '২০২৬',
+      hajiName: inquiry.nameBn || inquiry.name || 'হাজী যাত্রী',
+      hajiNameBn: inquiry.nameBn || inquiry.name,
+      phone: inquiry.phone || '',
+      email: inquiry.email,
+      nidNo: inquiry.nidNo,
+      passportNo: inquiry.passportNo,
+      district: inquiry.district || 'বগুড়া',
+      packageName: inquiry.serviceName || (detectedType === 'hajj' ? 'বেসরকারি ভিআইপি হজ্ব প্যাকেজ' : 'পবিত্র ওমরাহ কাফেলা প্যাকেজ'),
+      packagePrice: pkgPrice + discAmount,
+      discountAmount: discAmount,
+      paymentStatus: 'due',
+      notes: inquiry.message ? `রেজিস্ট্রেশন বার্তা: ${inquiry.message}` : 'আবেদনকারীকে ফাইন্যান্স লেজারে অন্তর্ভুক্ত করা হয়েছে।'
+    });
+
+    return record;
+  };
+
+  const getFinanceSummary = (filterYear?: string): FinanceSummary => {
+    const filteredRecords = filterYear && filterYear !== 'all'
+      ? hajiFinanceRecords.filter((r) => r.yearSeason.includes(filterYear))
+      : hajiFinanceRecords;
+
+    const filteredOfficeExpenses = filterYear && filterYear !== 'all'
+      ? officeExpenses.filter((e) => !e.yearSeason || e.yearSeason.includes(filterYear))
+      : officeExpenses;
+
+    const hajjRecords = filteredRecords.filter((r) => r.hajiType === 'hajj');
+    const umrahRecords = filteredRecords.filter((r) => r.hajiType === 'umrah');
+
+    // Counts
+    const totalHajjPilgrims = hajjRecords.length;
+    const totalUmrahPilgrims = umrahRecords.length;
+    const totalPilgrims = filteredRecords.length;
+
+    // Hajj Financials
+    const hajjTotalContract = hajjRecords.reduce((sum, r) => sum + r.finalTotalAmount, 0);
+    const hajjTotalDeposited = hajjRecords.reduce((sum, r) => sum + r.totalDeposited, 0);
+    const hajjTotalDue = hajjRecords.reduce((sum, r) => sum + r.dueAmount, 0);
+    const hajjPilgrimsExpense = hajjRecords.reduce((sum, r) => sum + r.totalExpense, 0);
+    const hajjOfficeOverhead = filteredOfficeExpenses
+      .filter((e) => e.expenseType === 'hajj_overhead')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const hajjTotalExpense = hajjPilgrimsExpense + hajjOfficeOverhead;
+    const hajjNetProfit = hajjTotalDeposited - hajjTotalExpense;
+
+    // Umrah Financials
+    const umrahTotalContract = umrahRecords.reduce((sum, r) => sum + r.finalTotalAmount, 0);
+    const umrahTotalDeposited = umrahRecords.reduce((sum, r) => sum + r.totalDeposited, 0);
+    const umrahTotalDue = umrahRecords.reduce((sum, r) => sum + r.dueAmount, 0);
+    const umrahPilgrimsExpense = umrahRecords.reduce((sum, r) => sum + r.totalExpense, 0);
+    const umrahOfficeOverhead = filteredOfficeExpenses
+      .filter((e) => e.expenseType === 'umrah_overhead')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const umrahTotalExpense = umrahPilgrimsExpense + umrahOfficeOverhead;
+    const umrahNetProfit = umrahTotalDeposited - umrahTotalExpense;
+
+    // Office & Overall
+    const generalOfficeExpense = filteredOfficeExpenses
+      .filter((e) => e.expenseType === 'general')
+      .reduce((sum, e) => sum + e.amount, 0);
+    const totalOfficeExpense = filteredOfficeExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+    const grandTotalDeposited = hajjTotalDeposited + umrahTotalDeposited;
+    const grandTotalExpenses = hajjPilgrimsExpense + umrahPilgrimsExpense + totalOfficeExpense;
+    const grandNetProfit = grandTotalDeposited - grandTotalExpenses;
+    const overallProfitMargin = grandTotalDeposited > 0 ? (grandNetProfit / grandTotalDeposited) * 100 : 0;
+
+    return {
+      totalHajjPilgrims,
+      totalUmrahPilgrims,
+      totalPilgrims,
+      hajjTotalContract,
+      hajjTotalDeposited,
+      hajjTotalDue,
+      hajjPilgrimsExpense,
+      hajjOfficeOverhead,
+      hajjTotalExpense,
+      hajjNetProfit,
+      umrahTotalContract,
+      umrahTotalDeposited,
+      umrahTotalDue,
+      umrahPilgrimsExpense,
+      umrahOfficeOverhead,
+      umrahTotalExpense,
+      umrahNetProfit,
+      generalOfficeExpense,
+      totalOfficeExpense,
+      grandTotalDeposited,
+      grandTotalExpenses,
+      grandNetProfit,
+      overallProfitMargin: Number(overallProfitMargin.toFixed(1))
+    };
+  };
+
   const resetToDefaults = () => {
     setCompanyInfo({
       ...DEFAULT_COMPANY_INFO,
@@ -1352,6 +1740,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setReviews(DEFAULT_REVIEWS);
     setPricingConfig(DEFAULT_PRICING_CONFIG);
     safeSet('muttaqi_pricing_config', JSON.stringify(DEFAULT_PRICING_CONFIG));
+    setHajiFinanceRecords(DEFAULT_HAJI_FINANCE_RECORDS);
+    safeSet('muttaqi_haji_finance_records', JSON.stringify(DEFAULT_HAJI_FINANCE_RECORDS));
+    setOfficeExpenses(DEFAULT_OFFICE_EXPENSES);
+    safeSet('muttaqi_office_expenses', JSON.stringify(DEFAULT_OFFICE_EXPENSES));
     showToast('ওয়েবসাইটের সকল তথ্য ও মূল্য ফ্যাক্টরি ডিফল্টে রিসেট করা হয়েছে!');
   };
 
@@ -1435,6 +1827,19 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         syncAllWithSupabase,
         refreshFromSupabase,
         supabaseSchemaSql: SUPABASE_SQL_SCHEMA,
+        hajiFinanceRecords,
+        officeExpenses,
+        addHajiFinanceRecord,
+        updateHajiFinanceRecord,
+        deleteHajiFinanceRecord,
+        addPilgrimPayment,
+        deletePilgrimPayment,
+        updatePilgrimExpenses,
+        addOfficeExpense,
+        updateOfficeExpense,
+        deleteOfficeExpense,
+        importInquiryToFinance,
+        getFinanceSummary,
         resetToDefaults
       }}
     >

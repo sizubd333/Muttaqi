@@ -35,11 +35,13 @@ import {
   CheckCheck,
   Compass,
   BadgePercent,
-  Database
+  Database,
+  Calculator
 } from 'lucide-react';
 import { AdminHajiRegistrations } from '../components/AdminHajiRegistrations';
 import { AdminPricingManager } from '../components/AdminPricingManager';
 import { AdminSupabaseManager } from '../components/AdminSupabaseManager';
+import { AdminFinanceManager } from '../components/AdminFinanceManager';
 
 interface AdminDashboardProps {
   setCurrentPage: (page: PageId) => void;
@@ -47,6 +49,7 @@ interface AdminDashboardProps {
 
 type TabType =
   | 'approvals'
+  | 'finance'
   | 'haji-registrations'
   | 'pricing'
   | 'supabase'
@@ -94,6 +97,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
     requestConfirm,
     showToast,
     supabaseStatus,
+    hajiFinanceRecords,
     resetToDefaults
   } = useAdmin();
 
@@ -235,6 +239,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
               label: `অনুমোদন কেন্দ্র (${totalPendingCount})`,
               icon: ShieldCheck,
               highlight: totalPendingCount > 0
+            },
+            {
+              id: 'finance',
+              label: `হজ ও ওমরাহ্ আয়-ব্যয় (${hajiFinanceRecords.length})`,
+              icon: Calculator,
+              highlight: true
             },
             {
               id: 'haji-registrations',
@@ -597,6 +607,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
               </div>
             )}
           </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* TAB: HAJJ & UMRAH INCOME & EXPENSE FINANCIAL LEDGER     */}
+        {/* ======================================================== */}
+        {activeTab === 'finance' && (
+          <AdminFinanceManager />
         )}
 
         {/* ======================================================== */}
