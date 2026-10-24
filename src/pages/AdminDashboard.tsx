@@ -40,7 +40,6 @@ import {
 } from 'lucide-react';
 import { AdminHajiRegistrations } from '../components/AdminHajiRegistrations';
 import { AdminPricingManager } from '../components/AdminPricingManager';
-import { AdminSupabaseManager } from '../components/AdminSupabaseManager';
 import { AdminFinanceManager } from '../components/AdminFinanceManager';
 
 interface AdminDashboardProps {
@@ -52,7 +51,6 @@ type TabType =
   | 'finance'
   | 'haji-registrations'
   | 'pricing'
-  | 'supabase'
   | 'general'
   | 'prayers'
   | 'services'
@@ -193,19 +191,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
 
           <div className="flex flex-wrap items-center gap-3">
             <button
-              onClick={() => setActiveTab('supabase')}
-              className="px-3 py-2 bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-400/40 text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer shadow-sm"
-              title="Supabase ক্লাউড ডাটাবেজ স্ট্যাটাস ও সেটআপ"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">Supabase:</span>
-              <span className="flex items-center gap-1.5 font-bold text-white">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>{supabaseStatus.isConnected ? 'সংযুক্ত' : 'কানেক্টেড'}</span>
-              </span>
-            </button>
-
-            <button
               onClick={() => {
                 setCurrentPage('home');
                 window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -256,12 +241,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
               id: 'pricing',
               label: 'মূল্য নির্ধারণ (প্যাকেজ, রুম, বিমান, খরচ)',
               icon: BadgePercent
-            },
-            {
-              id: 'supabase',
-              label: 'Supabase ডাটাবেজ',
-              icon: Database,
-              highlight: true
             },
             { id: 'services', label: `সেবাসমূহ (${services.length})`, icon: Briefcase },
             { id: 'gallery', label: `গ্যালারি (${galleryItems.length})`, icon: ImageIcon },
@@ -628,13 +607,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ setCurrentPage }
         {/* ======================================================== */}
         {activeTab === 'pricing' && (
           <AdminPricingManager />
-        )}
-
-        {/* ======================================================== */}
-        {/* TAB: SUPABASE CLOUD DATABASE STORAGE                     */}
-        {/* ======================================================== */}
-        {activeTab === 'supabase' && (
-          <AdminSupabaseManager />
         )}
 
         {/* ======================================================== */}
