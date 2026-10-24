@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { InquiryItem } from '../types';
+import { getAllGroupsOccupancy } from '../data/kafelaGroups';
 import {
   X,
   Save,
@@ -21,7 +22,8 @@ import {
 } from 'lucide-react';
 
 export const InquiryEditModal: React.FC = () => {
-  const { editingInquiryModal, closeInquiryModal, updateInquiry } = useAdmin();
+  const { editingInquiryModal, closeInquiryModal, updateInquiry, inquiries } = useAdmin();
+  const groupsOccupancy = useMemo(() => getAllGroupsOccupancy(inquiries), [inquiries]);
 
   const [form, setForm] = useState<InquiryItem | null>(null);
 
@@ -314,8 +316,8 @@ export const InquiryEditModal: React.FC = () => {
             </div>
           )}
 
-          {/* Service & Travelers */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Service, Kafela Group & Travelers */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-stone-700 mb-1">
                 আবেদিত সেবা / প্যাকেজ
@@ -324,8 +326,27 @@ export const InquiryEditModal: React.FC = () => {
                 type="text"
                 value={form.serviceName}
                 onChange={(e) => setForm({ ...form, serviceName: e.target.value })}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473]"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473]"
               />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-stone-700 mb-1 flex items-center justify-between">
+                <span>কাফেলা গ্রুপ</span>
+                <span className="text-[10px] text-amber-700 font-semibold">(সর্বোচ্চ ৫০ জন)</span>
+              </label>
+              <select
+                value={form.selectedGroup || ''}
+                onChange={(e) => setForm({ ...form, selectedGroup: e.target.value })}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473] bg-white font-medium text-stone-800"
+              >
+                <option value="">গ্রুপ নির্ধারণ করা নেই</option>
+                {groupsOccupancy.map((g) => (
+                  <option key={g.group.id} value={g.group.name}>
+                    {g.group.name} ({g.currentCount}/50 জন)
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -336,7 +357,7 @@ export const InquiryEditModal: React.FC = () => {
                 type="text"
                 value={form.travelers}
                 onChange={(e) => setForm({ ...form, travelers: e.target.value })}
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473]"
+                className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473]"
               />
             </div>
           </div>

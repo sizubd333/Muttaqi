@@ -129,6 +129,14 @@ export const HajiPortalModal: React.FC<HajiPortalModalProps> = ({
                 <span className="text-stone-500 block">প্যাকেজের নাম:</span>
                 <span className="font-bold text-stone-900">{haji.serviceName}</span>
               </div>
+              {haji.selectedGroup && (
+                <div>
+                  <span className="text-stone-500 block">কাফেলা গ্রুপ:</span>
+                  <span className="font-bold text-purple-900 bg-purple-100 px-2 py-0.5 rounded text-[11px] inline-block border border-purple-200">
+                    🏷️ {haji.selectedGroup} (সর্বোচ্চ ৫০ জন)
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-stone-500 block">রুম পছন্দ:</span>
                 <span className="font-semibold text-stone-800">{haji.roomPreference || 'সাধারণ রুম'}</span>

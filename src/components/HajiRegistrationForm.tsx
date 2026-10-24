@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAdmin } from '../context/AdminContext';
+import {
+  DEFAULT_KAFELA_GROUPS,
+  getAllGroupsOccupancy,
+  MAX_PILGRIMS_PER_GROUP
+} from '../data/kafelaGroups';
 import {
   Compass,
   ArrowLeft,
@@ -50,7 +55,16 @@ const SAMPLE_DOCS = {
 export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
   onBackToLogin
 }) => {
-  const { addInquiry, pricingConfig } = useAdmin();
+  const { addInquiry, pricingConfig, inquiries } = useAdmin();
+
+  // Kafela Groups Occupancy (৫০ জন প্রতি গ্রুপে)
+  const groupsOccupancy = useMemo(() => getAllGroupsOccupancy(inquiries), [inquiries]);
+
+  // First available non-full group as default
+  const defaultGroup = useMemo(() => {
+    const available = groupsOccupancy.find((g) => !g.isFull);
+    return available ? available.group.name : DEFAULT_KAFELA_GROUPS[0].name;
+  }, [groupsOccupancy]);
 
   const [formData, setFormData] = useState({
     nameBn: '',
@@ -74,6 +88,7 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
     hajPartnerIdLink: '',
     partnerDetails: '',
     serviceName: pricingConfig.packages[0]?.title || 'পবিত্র ওমরাহ কাফেলা প্যাকেজ (১৫ দিন)',
+    selectedGroup: defaultGroup,
     roomPreference: pricingConfig.rooms[0]?.title || 'শেয়ারিং ইকোনমি রুম (৪-৫ জন)',
     airfareOption: pricingConfig.airfares[0]?.title || 'বাংলাদেশ বিমান / সাউদিয়া ডিরেক্ট ফ্লাইট (ইকোনমি)',
     specialNotes: '',
@@ -227,6 +242,13 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
       return;
     }
 
+    // Validate Kafela Group capacity (সর্বোচ্চ ৫০ জন প্রতি গ্রুপে)
+    const chosenGroupOccupancy = groupsOccupancy.find((g) => g.group.name === formData.selectedGroup);
+    if (chosenGroupOccupancy && chosenGroupOccupancy.isFull) {
+      setFormError(`দুঃখিত! "${formData.selectedGroup}" গ্রুপটিতে ৫০ জন হাজী পূর্ণ হয়ে গেছে। অনুগ্রহ করে আসন খালি থাকা অন্য একটি গ্রুপ নির্বাচন করুন।`);
+      return;
+    }
+
     setIsSubmitting(true);
 
     const ref = `HAJI-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -242,6 +264,7 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
         email: formData.email || undefined,
         serviceId: 'haji-full-registration',
         serviceName: formData.serviceName,
+        selectedGroup: formData.selectedGroup,
         travelers: formData.totalHajPartner && !formData.totalHajPartner.includes('০ জন') ? `১+ (${formData.totalHajPartner})` : '১ জন (নিবন্ধনকৃত)',
         district: formData.presentAddress ? `${formData.presentAddress} (পোস্ট: ${formData.presentPostCode})` : undefined,
         passportOrNid: formData.passportNo || formData.nidNo || undefined,
@@ -372,6 +395,15 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
             </div>
           )}
 
+          {formData.selectedGroup && (
+            <div className="flex justify-between items-center text-xs">
+              <span className="text-stone-500">নির্বাচিত কাফেলা গ্রুপ:</span>
+              <span className="font-semibold text-purple-900 bg-purple-100 px-2 py-0.5 rounded text-[11px] border border-purple-200">
+                {formData.selectedGroup} (সর্বোচ্চ ৫০ জন)
+              </span>
+            </div>
+          )}
+
           <div className="flex justify-between items-center text-xs pt-1 border-t border-stone-200">
             <span className="text-stone-500">আপলোডকৃত ডকুমেন্ট:</span>
             <span className="text-[11px] font-semibold text-emerald-700">
@@ -463,6 +495,7 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
                 hajPartnerIdLink: '',
                 partnerDetails: '',
                 serviceName: pricingConfig.packages[0]?.title || 'পবিত্র ওমরাহ কাফেলা প্যাকেজ (১৫ দিন)',
+                selectedGroup: defaultGroup,
                 roomPreference: pricingConfig.rooms[0]?.title || 'শেয়ারিং ইকোনমি রুম (৪-৫ জন)',
                 airfareOption: pricingConfig.airfares[0]?.title || 'বাংলাদেশ বিমান / সাউদিয়া ডিরেক্ট ফ্লাইট (ইকোনমি)',
                 specialNotes: '',
@@ -930,6 +963,182 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
             </div>
           </div>
 
+          {/* ======================================================== */}
+          {/* KAFELA GROUP SELECTION CARD (প্রতি গ্রুপে সর্বোচ্চ ৫০ জন)  */}
+          {/* ======================================================== */}
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-[#DCB473]/60 shadow-xs space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-stone-200">
+              <div>
+                <label className="text-xs sm:text-sm font-bold text-[#0f2922] flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#b88e44]" />
+                  <span>কাফেলা গ্রুপ নির্বাচন (Kafela Group Selection) *</span>
+                </label>
+                <p className="text-[11px] text-stone-500 mt-0.5">
+                  আপনার কাফেলা গ্রুপ নির্বাচন করুন। মোয়াল্লিম ও নির্ধারিত সফরসূচি গ্রুপ অনুযায়ী পরিচালিত হবে।
+                </p>
+              </div>
+
+              {/* NB Capacity Badge */}
+              <div className="flex items-center gap-1.5 self-start sm:self-auto bg-amber-50 text-amber-900 border border-amber-300 px-3 py-1 rounded-full text-[11px] font-bold">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>NB: প্রতি গ্রুপে সর্বোচ্চ ৫০ জন হাজী</span>
+              </div>
+            </div>
+
+            {/* NB Warning Banner */}
+            <div className="p-3 bg-gradient-to-r from-amber-50 via-amber-50/70 to-orange-50/40 rounded-xl border border-amber-200 text-xs text-amber-950 flex items-start gap-2.5 leading-relaxed">
+              <span className="text-base leading-none">📌</span>
+              <div>
+                <strong className="font-bold text-amber-900">বিশেষ দ্রষ্টব্য (NB):</strong> প্রতিটি কাফেলা গ্রুপে সর্বোচ্চ <span className="font-bold underline decoration-amber-500">৫০ জন হাজী</span> নিবন্ধন করতে পারবেন। গ্রুপে আসন পূর্ণ (৫০/৫০) হয়ে গেলে সেই গ্রুপে আর নতুন নিবন্ধন নেওয়া হবে না।
+              </div>
+            </div>
+
+            {/* Quick Dropdown for Mobile / Direct Selection */}
+            <div>
+              <label className="block text-[11px] font-bold text-stone-700 mb-1">
+                গ্রুপ ড্রপডাউন নির্বাচন:
+              </label>
+              <select
+                value={formData.selectedGroup}
+                onChange={(e) => setFormData({ ...formData, selectedGroup: e.target.value })}
+                className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 bg-white focus:outline-none focus:ring-2 focus:ring-[#DCB473] font-medium text-stone-900"
+              >
+                {groupsOccupancy.map((item) => (
+                  <option
+                    key={item.group.id}
+                    value={item.group.name}
+                    disabled={item.isFull}
+                  >
+                    {item.group.name} ({item.group.category}) — {item.isFull ? '❌ গ্রুপ পূর্ণ (৫০/৫০ জন)' : `আসন: ${item.currentCount}/৫০ জন (${item.seatsLeft}টি আসন খালি)`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Interactive Grid of Kafela Group Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+              {groupsOccupancy.map((item) => {
+                const isSelected = formData.selectedGroup === item.group.name;
+                const isFull = item.isFull;
+
+                return (
+                  <div
+                    key={item.group.id}
+                    onClick={() => {
+                      if (!isFull) {
+                        setFormData({ ...formData, selectedGroup: item.group.name });
+                      }
+                    }}
+                    className={`relative p-3.5 rounded-2xl border-2 text-left transition-all flex flex-col justify-between ${
+                      isFull
+                        ? 'bg-stone-100/80 border-stone-200 opacity-60 cursor-not-allowed'
+                        : isSelected
+                        ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-300 shadow-sm cursor-pointer'
+                        : 'bg-white border-stone-200 hover:border-[#DCB473] hover:shadow-xs cursor-pointer'
+                    }`}
+                  >
+                    {/* Header: Category Badge & Status Badge */}
+                    <div>
+                      <div className="flex items-center justify-between gap-1 mb-1.5">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                          item.group.category === 'হজ্ব'
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                            : 'bg-teal-100 text-teal-900 border border-teal-300'
+                        }`}>
+                          {item.group.category} কাফেলা
+                        </span>
+
+                        {isFull ? (
+                          <span className="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200 flex items-center gap-1">
+                            <Lock className="w-2.5 h-2.5" />
+                            পূর্ণ (৫০/৫০)
+                          </span>
+                        ) : item.seatsLeft <= 5 ? (
+                          <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" />
+                            সীমিত আসন
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                            <Check className="w-2.5 h-2.5" />
+                            আসন উন্মুক্ত
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Group Name & Selection Radio */}
+                      <div className="flex items-start justify-between gap-2">
+                        <h5 className="text-xs font-bold text-[#0f2922] leading-tight">
+                          {item.group.name}
+                        </h5>
+                        <div
+                          className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
+                            isSelected
+                              ? 'border-emerald-600 bg-emerald-600 text-white'
+                              : isFull
+                              ? 'border-stone-300 bg-stone-200'
+                              : 'border-stone-300 bg-white'
+                          }`}
+                        >
+                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white"></div>}
+                        </div>
+                      </div>
+
+                      {/* Leader & Date */}
+                      <div className="mt-2 space-y-1 text-[11px] text-stone-600">
+                        <div className="flex items-center gap-1">
+                          <User className="w-3 h-3 text-[#b88e44] shrink-0" />
+                          <span className="truncate">মোয়াল্লিম: {item.group.leader}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-[#b88e44] shrink-0" />
+                          <span>সফর: {item.group.departureMonth}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar & Seat Occupancy (Max 50) */}
+                    <div className="mt-3 pt-2.5 border-t border-stone-200/80">
+                      <div className="flex items-center justify-between text-[11px] mb-1 font-mono">
+                        <span className="text-stone-600">নিবন্ধিত হাজী:</span>
+                        <span className={`font-bold ${isFull ? 'text-rose-600' : 'text-[#0f2922]'}`}>
+                          {item.currentCount} / {MAX_PILGRIMS_PER_GROUP} জন
+                        </span>
+                      </div>
+
+                      {/* Visual Meter */}
+                      <div className="w-full bg-stone-200 rounded-full h-2 overflow-hidden">
+                        <div
+                          className={`h-full transition-all duration-300 rounded-full ${
+                            isFull
+                              ? 'bg-rose-500'
+                              : item.seatsLeft <= 5
+                              ? 'bg-amber-500'
+                              : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${item.progressPercent}%` }}
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-stone-500 mt-1">
+                        <span>ধারণক্ষমতা: ৫০ জন</span>
+                        <span className={`font-semibold ${
+                          isFull
+                            ? 'text-rose-600'
+                            : item.seatsLeft <= 5
+                            ? 'text-amber-700'
+                            : 'text-emerald-700'
+                        }`}>
+                          {isFull ? 'কোনো আসন খালি নেই' : `${item.seatsLeft} টি আসন অবশিষ্ট`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Row 2: Airfare Selection & Total Haj Partner */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
             <div>
@@ -1131,6 +1340,18 @@ export const HajiRegistrationForm: React.FC<HajiRegistrationFormProps> = ({
                   ৳ {packagePrice.toLocaleString('bn-BD')}
                 </span>
               </div>
+
+              {formData.selectedGroup && (
+                <div className="flex items-center justify-between py-1 border-b border-white/10">
+                  <span className="text-stone-300 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#DCB473]"></span>
+                    কাফেলা গ্রুপ:
+                  </span>
+                  <span className="font-semibold text-[#DCB473] text-right truncate max-w-[240px]">
+                    {formData.selectedGroup}
+                  </span>
+                </div>
+              )}
 
               <div className="flex items-center justify-between py-1 border-b border-white/10">
                 <span className="text-stone-300 flex items-center gap-1.5">

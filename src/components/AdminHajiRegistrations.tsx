@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { InquiryItem } from '../types';
 import { useAdmin } from '../context/AdminContext';
+import { getAllGroupsOccupancy, MAX_PILGRIMS_PER_GROUP } from '../data/kafelaGroups';
 import {
   Compass,
   CheckCircle2,
@@ -56,6 +57,7 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'contacted' | 'rejected'>('all');
   const [packageFilter, setPackageFilter] = useState<string>('all');
+  const [groupFilter, setGroupFilter] = useState<string>('all');
   const [previewDoc, setPreviewDoc] = useState<{ url: string; title: string; hajiName: string } | null>(null);
   const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
   const [printHaji, setPrintHaji] = useState<InquiryItem | null>(null);
@@ -64,6 +66,9 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
   const [discountHaji, setDiscountHaji] = useState<InquiryItem | null>(null);
   const [discountPercentInput, setDiscountPercentInput] = useState<number>(0);
   const [discountNoteInput, setDiscountNoteInput] = useState<string>('');
+
+  // Groups Occupancy calculations (max 50 per group)
+  const groupsOccupancy = useMemo(() => getAllGroupsOccupancy(inquiries), [inquiries]);
 
   // Filter only Haji Registrations
   const hajiList = useMemo(() => {
@@ -88,6 +93,10 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
       }
       // Package filter
       if (packageFilter !== 'all' && haji.serviceName !== packageFilter) {
+        return false;
+      }
+      // Group filter
+      if (groupFilter !== 'all' && haji.selectedGroup !== groupFilter) {
         return false;
       }
       // Search term
@@ -245,6 +254,23 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
               ))}
             </select>
           </div>
+
+          {/* Kafela Group Filter (৫০ জন সর্বোচ্চ) */}
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-purple-600 shrink-0" />
+            <select
+              value={groupFilter}
+              onChange={(e) => setGroupFilter(e.target.value)}
+              className="px-3 py-2 text-xs sm:text-sm rounded-xl border border-purple-200 bg-purple-50/50 focus:outline-none focus:ring-2 focus:ring-purple-400 font-medium text-purple-900"
+            >
+              <option value="all">সকল কাফেলা গ্রুপ ({groupsOccupancy.length}টি)</option>
+              {groupsOccupancy.map((item) => (
+                <option key={item.group.id} value={item.group.name}>
+                  {item.group.name} — {item.currentCount}/{MAX_PILGRIMS_PER_GROUP} জন {item.isFull ? '(পূর্ণ)' : `(${item.seatsLeft}টি আসন খালি)`}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Status Filter Buttons */}
@@ -301,6 +327,68 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
           >
             বাতিল ({rejectedCount})
           </button>
+        </div>
+      </div>
+
+      {/* 2.5. Kafela Groups Capacity Summary Widget (NB: প্রতি গ্রুপে সর্বোচ্চ ৫০ জন) */}
+      <div className="bg-white p-5 rounded-3xl border border-stone-200/90 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-stone-100">
+          <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-purple-700" />
+            <h3 className="text-sm font-bold text-[#0f2922]">
+              কাফেলা গ্রুপভিত্তিক হজযাত্রী আসন ট্র্যাকার (প্রতি গ্রুপে সর্বোচ্চ ৫০ জন হাজী)
+            </h3>
+          </div>
+          <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 self-start sm:self-auto">
+            NB: প্রতি গ্রুপ ধারণক্ষমতা ৫০ জন
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+          {groupsOccupancy.map((item) => {
+            const isFull = item.isFull;
+            const isCurrentFilter = groupFilter === item.group.name;
+
+            return (
+              <div
+                key={item.group.id}
+                onClick={() => setGroupFilter(isCurrentFilter ? 'all' : item.group.name)}
+                className={`p-3 rounded-2xl border transition-all cursor-pointer ${
+                  isCurrentFilter
+                    ? 'bg-purple-50/80 border-purple-400 ring-2 ring-purple-300'
+                    : 'bg-stone-50 hover:bg-stone-100/80 border-stone-200'
+                }`}
+              >
+                <div className="flex items-center justify-between text-xs font-bold mb-1">
+                  <span className="text-[#0f2922] truncate">{item.group.name}</span>
+                  {isFull ? (
+                    <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
+                      পূর্ণ (৫০/৫০)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded">
+                      {item.seatsLeft} আসন বাকি
+                    </span>
+                  )}
+                </div>
+
+                {/* Progress */}
+                <div className="w-full bg-stone-200 rounded-full h-1.5 overflow-hidden my-1.5">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      isFull ? 'bg-rose-500' : item.seatsLeft <= 5 ? 'bg-amber-500' : 'bg-purple-600'
+                    }`}
+                    style={{ width: `${item.progressPercent}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-stone-500">
+                  <span>মোয়াল্লিম: {item.group.leader}</span>
+                  <span className="font-mono font-bold text-stone-700">{item.currentCount}/{MAX_PILGRIMS_PER_GROUP} জন</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -417,6 +505,12 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
                         <span className="font-semibold text-emerald-950 bg-emerald-100/70 px-2 py-0.5 rounded">
                           {haji.serviceName || 'ওমরাহ/হজ্ব কাফেলা'}
                         </span>
+                        {haji.selectedGroup && (
+                          <span className="font-semibold text-purple-900 bg-purple-100 px-2 py-0.5 rounded border border-purple-200 flex items-center gap-1">
+                            <Users className="w-3 h-3 text-purple-700" />
+                            <span>গ্রুপ: {haji.selectedGroup}</span>
+                          </span>
+                        )}
                         <span className="text-stone-400">•</span>
                         <span>রুম: {haji.roomPreference || 'স্ট্যান্ডার্ড'}</span>
                         <span className="text-stone-400">•</span>
@@ -583,6 +677,12 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
                       <Compass className="w-3.5 h-3.5 text-[#b88e44]" />
                       হজ্ব পার্টনার ও গ্রুপ কাফেলা
                     </span>
+                    <div>
+                      <span className="text-stone-500 block">কাফেলা গ্রুপ:</span>
+                      <span className="font-bold text-purple-950 bg-purple-100 px-2 py-0.5 rounded border border-purple-300 inline-block text-[11px]">
+                        🏷️ {haji.selectedGroup || 'গ্রুপ বরাদ্দ বাকি'} (সর্বোচ্চ ৫০ জন)
+                      </span>
+                    </div>
                     <div>
                       <span className="text-stone-500 block">মোট হজ্ব পার্টনার:</span>
                       <span className="font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded border border-amber-300 inline-block text-[11px]">
@@ -973,6 +1073,14 @@ export const AdminHajiRegistrations: React.FC<AdminHajiRegistrationsProps> = () 
                   <span className="text-stone-500">নির্বাচিত প্যাকেজ:</span>
                   <span className="font-semibold text-emerald-900">{printHaji.serviceName}</span>
                 </div>
+                {printHaji.selectedGroup && (
+                  <div className="flex justify-between border-b pb-1">
+                    <span className="text-stone-500">কাফেলা গ্রুপ:</span>
+                    <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                      {printHaji.selectedGroup} (সর্বোচ্চ ৫০ জন)
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between border-b pb-1">
                   <span className="text-stone-500">মোট পার্টনার / যাত্রী:</span>
                   <span className="font-semibold text-stone-800">

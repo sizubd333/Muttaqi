@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAdmin } from '../context/AdminContext';
-import { X, CheckCircle, Phone, MessageCircle, Send } from 'lucide-react';
+import { getAllGroupsOccupancy, MAX_PILGRIMS_PER_GROUP } from '../data/kafelaGroups';
+import { X, CheckCircle, Phone, MessageCircle, Send, Users } from 'lucide-react';
 
 interface ServiceInquiryModalProps {
   isOpen: boolean;
@@ -13,8 +14,10 @@ export const ServiceInquiryModal: React.FC<ServiceInquiryModalProps> = ({
   onClose,
   defaultServiceId
 }) => {
-  const { services, companyInfo, addInquiry } = useAdmin();
+  const { services, companyInfo, addInquiry, inquiries } = useAdmin();
+  const groupsOccupancy = useMemo(() => getAllGroupsOccupancy(inquiries), [inquiries]);
   const [selectedService, setSelectedService] = useState<string>(defaultServiceId || (services[0]?.id || 'hajj-umrah'));
+  const [selectedGroup, setSelectedGroup] = useState<string>('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [travelers, setTravelers] = useState('১ জন (একক)');
@@ -36,6 +39,7 @@ export const ServiceInquiryModal: React.FC<ServiceInquiryModalProps> = ({
       phone: phone.trim(),
       serviceId: selectedService,
       serviceName: activeService ? activeService.title : 'সাধারণ সেবা',
+      selectedGroup: selectedGroup || undefined,
       travelers,
       message: message.trim()
     });
@@ -73,9 +77,14 @@ export const ServiceInquiryModal: React.FC<ServiceInquiryModalProps> = ({
             <h3 className="text-2xl font-bold text-stone-900 mb-2">
               আলহামদুলিল্লাহ! আপনার অনুরোধ গৃহীত হয়েছে
             </h3>
-            <p className="text-sm text-stone-600 leading-relaxed max-w-sm mx-auto mb-6">
+            <p className="text-sm text-stone-600 leading-relaxed max-w-sm mx-auto mb-4">
               মুত্তাকী হজ্ব ও কন্সাল্টেন্সির পক্ষ থেকে অতি শীঘ্রই আপনার সাথে ({phone}) নম্বরে যোগাযোগ করা হবে, ইনশাআল্লাহ।
             </p>
+            {selectedGroup && (
+              <p className="text-xs text-purple-900 bg-purple-50 border border-purple-200 py-1.5 px-3 rounded-lg max-w-sm mx-auto mb-5 font-medium">
+                কাফেলা গ্রুপ: <strong>{selectedGroup}</strong> (আসন বরাদ্দ প্রক্রিয়াভুক্ত)
+              </p>
+            )}
             <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 mb-6 text-xs text-stone-600 space-y-1">
               <p>জরুরি তথ্যের জন্য সরাসরি আমাদের হেল্পলাইনে কল করতে পারেন:</p>
               <p className="text-sm font-bold text-[#0f2922]">{companyInfo.phone1Display}</p>
@@ -162,6 +171,34 @@ export const ServiceInquiryModal: React.FC<ServiceInquiryModalProps> = ({
                   <option value="২ জন (দম্পতি / সঙ্গী)">২ জন (দম্পতি / সঙ্গী)</option>
                   <option value="৩-৫ জন (পরিবার)">৩-৫ জন (পরিবার)</option>
                   <option value="৬+ জন (কাফেলা / গ্রুপ)">৬+ জন (কাফেলা / গ্রুপ)</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-stone-700 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-purple-700" />
+                    কাফেলা গ্রুপ নির্বাচন (ঐচ্ছিক)
+                  </label>
+                  <span className="text-[10px] text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    NB: প্রতি গ্রুপে সর্বোচ্চ ৫০ জন
+                  </span>
+                </div>
+                <select
+                  value={selectedGroup}
+                  onChange={(e) => setSelectedGroup(e.target.value)}
+                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-stone-300 focus:outline-none focus:ring-2 focus:ring-[#DCB473] focus:border-[#DCB473] bg-white"
+                >
+                  <option value="">গ্রুপ নির্ধারণ নেই (পরামর্শ অনুযায়ী ঠিক হবে)</option>
+                  {groupsOccupancy.map((item) => (
+                    <option
+                      key={item.group.id}
+                      value={item.group.name}
+                      disabled={item.isFull}
+                    >
+                      {item.group.name} ({item.group.category}) — {item.isFull ? '❌ পূর্ণ (৫০/৫০ জন)' : `${item.currentCount}/${MAX_PILGRIMS_PER_GROUP} জন (${item.seatsLeft} আসন বাকি)`}
+                    </option>
+                  ))}
                 </select>
               </div>
 

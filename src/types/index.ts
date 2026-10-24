@@ -135,6 +135,20 @@ export interface InquiryItem {
   finalTotalAmount?: number;
   discountNote?: string;
   pricingUpdatedAt?: string;
+
+  // Kafela Group Selection (সর্বোচ্চ ৫০ জন প্রতি গ্রুপে)
+  selectedGroup?: string;
+}
+
+export interface KafelaGroup {
+  id: string;
+  name: string;
+  type: 'hajj' | 'umrah' | 'both';
+  category?: string;
+  leader: string;
+  maxCapacity: number; // 50 persons per group
+  departureDate?: string;
+  departureMonth?: string;
 }
 
 export type PricingCategory = 'package' | 'room' | 'airfare' | 'incidental';
